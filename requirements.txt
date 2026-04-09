@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+pydantic-settings
+httpx
+jinja2
+python-multipart
+pytest

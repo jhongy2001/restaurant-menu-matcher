@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Restaurant Menu Photo Matcher</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="container">
+    <h1>Restaurant Menu Photo Matcher</h1>
+    <p class="hint">Search by city or postal code, choose a restaurant, then click a dish to view top-5 matched photos.</p>
+
+    <section class="panel">
+      <h2>1) Search Restaurants</h2>
+      <form id="search-form">
+        <div class="row">
+          <label>City or Postal Code
+            <input id="area_query" list="location-suggestions" placeholder="e.g. Boston or 02115" autocomplete="off" required>
+            <datalist id="location-suggestions"></datalist>
+          </label>
+          <label>Restaurant Name
+            <input id="restaurant_name" placeholder="required" required>
+          </label>
+        </div>
+        <button type="submit">Search</button>
+      </form>
+      <div id="restaurant-results-container">
+        <ul id="restaurant-list"></ul>
+      </div>
+      <div id="selected-restaurant-card" class="selected-card hidden">
+        <div>
+          <div id="selected-restaurant-name" class="selected-title"></div>
+          <div id="selected-restaurant-address" class="hint"></div>
+        </div>
+        <button id="change-restaurant-btn" type="button">Change selection</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>2) Menu</h2>
+      <ul id="dish-list"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>3) Top-5 Matched Images</h2>
+      <div id="image-grid" class="image-grid"></div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
