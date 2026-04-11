@@ -5,6 +5,19 @@ from app.services.providers.mock_provider import MockRestaurantProvider
 from app.services.providers.yelp_provider import YelpRestaurantProvider
 
 
+def _merge_photos_by_url(*groups: list[Photo]) -> list[Photo]:
+    seen: set[str] = set()
+    out: list[Photo] = []
+    for group in groups:
+        for p in group:
+            key = p.url.split("?", 1)[0].rstrip("/")
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(p)
+    return out
+
+
 class CompositeRestaurantProvider(RestaurantDataProvider):
     def __init__(
         self,
@@ -16,6 +29,7 @@ class CompositeRestaurantProvider(RestaurantDataProvider):
         self.mock = mock
         self.yelp = yelp
         self.google = google
+        self._google_place_by_yelp_restaurant: dict[str, str] = {}
 
     def suggest_locations(self, query: str) -> list[str]:
         suggestions: list[str] = []
@@ -25,7 +39,6 @@ class CompositeRestaurantProvider(RestaurantDataProvider):
             except Exception:
                 pass
         suggestions.extend(self.mock.suggest_locations(query))
-        # Preserve order and deduplicate.
         seen: set[str] = set()
         ordered: list[str] = []
         for s in suggestions:
@@ -33,6 +46,27 @@ class CompositeRestaurantProvider(RestaurantDataProvider):
                 seen.add(s)
                 ordered.append(s)
         return ordered[:10]
+
+    def _resolve_google_place_id(self, restaurant_id: str) -> str | None:
+        if not self.google or not self.yelp or not restaurant_id.startswith("yelp:"):
+            return None
+        cached = self._google_place_by_yelp_restaurant.get(restaurant_id)
+        if cached:
+            return cached
+        try:
+            payload = self.yelp.get_business_payload(restaurant_id)
+            name = (payload.get("name") or "").strip()
+            loc = payload.get("location") or {}
+            addr = ", ".join(loc.get("display_address") or [])
+            query = f"{name} {addr}".strip()
+            if not query:
+                return None
+            place_id = self.google.search_place_id(query)
+            if place_id:
+                self._google_place_by_yelp_restaurant[restaurant_id] = place_id
+            return place_id
+        except Exception:
+            return None
 
     def search_restaurants(self, *, area_query: str, name: str | None) -> list[Restaurant]:
         if self.yelp:
@@ -46,6 +80,15 @@ class CompositeRestaurantProvider(RestaurantDataProvider):
 
     def get_menu(self, restaurant_id: str) -> list[Dish]:
         if restaurant_id.startswith("yelp:") and self.yelp:
+            if self.google:
+                try:
+                    place_id = self._resolve_google_place_id(restaurant_id)
+                    if place_id:
+                        dishes = self.google.menu_dishes_for_restaurant(restaurant_id, place_id)
+                        if dishes:
+                            return dishes
+                except Exception:
+                    pass
             try:
                 return self.yelp.get_menu(restaurant_id)
             except Exception:
@@ -53,9 +96,19 @@ class CompositeRestaurantProvider(RestaurantDataProvider):
         return self.mock.get_menu(restaurant_id)
 
     def get_review_photos(self, restaurant_id: str) -> list[Photo]:
+        yelp_photos: list[Photo] = []
+        google_photos: list[Photo] = []
         if restaurant_id.startswith("yelp:") and self.yelp:
             try:
-                return self.yelp.get_review_photos(restaurant_id)
+                yelp_photos = self.yelp.get_review_photos(restaurant_id)
             except Exception:
-                return []
+                yelp_photos = []
+            if self.google:
+                try:
+                    place_id = self._resolve_google_place_id(restaurant_id)
+                    if place_id:
+                        google_photos = self.google.place_photos_for_restaurant(restaurant_id, place_id)
+                except Exception:
+                    google_photos = []
+            return _merge_photos_by_url(yelp_photos, google_photos)
         return self.mock.get_review_photos(restaurant_id)

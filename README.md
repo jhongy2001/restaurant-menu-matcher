@@ -11,10 +11,10 @@ This repository contains a robust FastAPI project foundation for your CS5100 fin
   - matcher abstraction
   - TTL cache utility
 - End-to-end web flow:
-  1. Search restaurants by `location` or `postal code`
+  1. Search restaurants by **city or postal code** (`area_query`) and **required restaurant name**
   2. Choose a restaurant from name + address list
-  3. Load menu dishes and descriptions
-  4. Click a dish and view top-k matched images
+  3. Load menu: prefers **Google Maps business menus** when available; otherwise Yelp category-based placeholder items
+  4. Click a dish and view **top-5** matched images from **Yelp + Google Maps** photos (deduplicated)
 - Stable mock provider so the full flow works before external API integration.
 - Basic tests for health check and happy-path flow.
 
@@ -54,9 +54,19 @@ uvicorn app.main:app --reload
 - UI: `http://127.0.0.1:8000/`
 - API docs: `http://127.0.0.1:8000/docs`
 
-## Next implementation step (no refactor needed)
+## External APIs (Google Cloud Console)
 
-1. Add `YelpRestaurantProvider` and `GooglePlacesProvider` under `app/services/providers/`.
-2. Add provider selection/fallback policy in `app/api/dependencies.py`.
-3. Replace `LexicalImageMatcher` with CLIP-based matcher implementation in `app/services/matching/`.
-4. Keep all API routes and frontend unchanged.
+Enable for your API key (Maps Platform):
+
+- **Places API** (legacy Autocomplete for location suggestions)
+- **Places API (New)** — Text Search, Place Details, Place Photos (used for menus and extra images)
+
+Coverage notes:
+
+- **Google `businessMenus`** exists only for some listings and may require specific billing SKUs; if empty, the app falls back to Yelp pseudo-menu items.
+- **Yelp Fusion** does not expose per-review food photos on the standard free tier; user-submitted dish photos in-app mainly come from **Google’s place photo set** (owner + contributor mix) plus **Yelp business photos**.
+
+## Next implementation step
+
+1. Replace `LexicalImageMatcher` with a CLIP-based matcher under `app/services/matching/`.
+2. Optional: add a dedicated menu data partner (e.g. OpenMenu or delivery-platform APIs) behind a new provider if you need broader real-menu coverage.

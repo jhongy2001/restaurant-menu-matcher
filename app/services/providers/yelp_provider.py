@@ -20,6 +20,7 @@ class YelpRestaurantProvider(RestaurantDataProvider):
 
     def __init__(self, api_key: str):
         self.api_key = api_key
+        self._business_payload_cache: dict[str, dict] = {}
 
     def _client(self) -> httpx.Client:
         return httpx.Client(
@@ -64,13 +65,21 @@ class YelpRestaurantProvider(RestaurantDataProvider):
     def _strip_id(self, restaurant_id: str) -> str:
         return restaurant_id.split(":", 1)[1] if restaurant_id.startswith("yelp:") else restaurant_id
 
-    def get_menu(self, restaurant_id: str) -> list[Dish]:
-        # Yelp API does not provide structured menu; generate stable pseudo-menu from categories.
+    def get_business_payload(self, restaurant_id: str) -> dict:
+        """Cached Yelp business details (used for menu, photos, and Google place resolution)."""
         business_id = self._strip_id(restaurant_id)
+        if business_id in self._business_payload_cache:
+            return self._business_payload_cache[business_id]
         with self._client() as client:
             response = client.get(f"/businesses/{business_id}")
             response.raise_for_status()
             payload = response.json()
+        self._business_payload_cache[business_id] = payload
+        return payload
+
+    def get_menu(self, restaurant_id: str) -> list[Dish]:
+        # Yelp API does not provide structured menu; generate stable pseudo-menu from categories.
+        payload = self.get_business_payload(restaurant_id)
         categories = [c.get("title", "") for c in payload.get("categories", []) if c.get("title")]
         if not categories:
             categories = ["Chef Special"]
@@ -86,12 +95,8 @@ class YelpRestaurantProvider(RestaurantDataProvider):
         return dishes
 
     def get_review_photos(self, restaurant_id: str) -> list[Photo]:
-        business_id = self._strip_id(restaurant_id)
-        with self._client() as client:
-            response = client.get(f"/businesses/{business_id}")
-            response.raise_for_status()
-            payload = response.json()
-        urls = payload.get("photos", []) or []
+        payload = self.get_business_payload(restaurant_id)
+        urls = list(payload.get("photos", []) or [])
         # Yelp business details sometimes omit `photos`; use `image_url` as fallback.
         if not urls and payload.get("image_url"):
             urls = [payload["image_url"]]
@@ -99,5 +104,11 @@ class YelpRestaurantProvider(RestaurantDataProvider):
             urls = self.FALLBACK_FOOD_IMAGES
         photos: list[Photo] = []
         for idx, url in enumerate(urls, start=1):
-            photos.append(Photo(id=f"{restaurant_id}:photo:{idx}", url=url, caption="Restaurant food photo"))
+            photos.append(
+                Photo(
+                    id=f"{restaurant_id}:photo:{idx}",
+                    url=url,
+                    caption="Yelp listing photo food restaurant",
+                )
+            )
         return photos
