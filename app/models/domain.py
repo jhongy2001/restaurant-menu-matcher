@@ -23,3 +23,6 @@ class Photo:
     id: str
     url: str
     caption: str
+    source: str = ""
+    is_user_contributed: bool = False
+    is_placeholder: bool = False

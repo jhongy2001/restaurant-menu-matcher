@@ -4,4 +4,7 @@ pydantic-settings
 httpx
 jinja2
 python-multipart
+pillow
+transformers; python_version < "3.14"
+torch; python_version < "3.14"
 pytest

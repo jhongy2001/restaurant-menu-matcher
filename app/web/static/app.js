@@ -11,6 +11,25 @@ const restaurantResultsContainer = document.getElementById("restaurant-results-c
 const changeRestaurantBtn = document.getElementById("change-restaurant-btn");
 
 let selectedRestaurantId = null;
+let displayedDishId = null;
+let pendingDishId = null;
+let hoverRequestToken = 0;
+let hoverDebounceTimer = null;
+const dishImageCache = new Map();
+
+function setMessage(container, tagName, className, message) {
+  container.innerHTML = "";
+  const node = document.createElement(tagName);
+  node.className = className;
+  node.textContent = message;
+  container.appendChild(node);
+}
+
+function buildRestaurantAddress(restaurant) {
+  return [restaurant.address, `${restaurant.city} ${restaurant.postal_code}`.trim()]
+    .filter(Boolean)
+    .join(", ");
+}
 
 function clearUIAfterRestaurantChange() {
   dishList.innerHTML = "";
@@ -18,6 +37,13 @@ function clearUIAfterRestaurantChange() {
   selectedRestaurantCard.classList.add("hidden");
   selectedRestaurantName.textContent = "";
   selectedRestaurantAddress.textContent = "";
+  displayedDishId = null;
+  pendingDishId = null;
+  dishImageCache.clear();
+  if (hoverDebounceTimer) {
+    clearTimeout(hoverDebounceTimer);
+    hoverDebounceTimer = null;
+  }
 }
 
 function showRestaurantResults() {
@@ -52,19 +78,32 @@ async function fetchJson(url) {
 function renderRestaurants(restaurants) {
   restaurantList.innerHTML = "";
   if (!restaurants.length) {
-    restaurantList.innerHTML = "<li class='hint'>No restaurants found.</li>";
+    setMessage(restaurantList, "li", "hint", "No restaurants found.");
     return;
   }
   restaurants.forEach((r) => {
     const li = document.createElement("li");
     li.className = "card";
-    li.innerHTML = `
-      <div>
-        <strong>${r.name}</strong><br>
-        <span>${r.address}, ${r.city} ${r.postal_code}</span>
-      </div>
-      <button data-id="${r.id}" data-name="${r.name}" data-address="${r.address}" data-city="${r.city}" data-postal="${r.postal_code}">Choose</button>
-    `;
+    const content = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = r.name;
+    const lineBreak = document.createElement("br");
+    const address = document.createElement("span");
+    address.textContent = buildRestaurantAddress(r);
+    content.appendChild(title);
+    content.appendChild(lineBreak);
+    content.appendChild(address);
+
+    const button = document.createElement("button");
+    button.dataset.id = r.id;
+    button.dataset.name = r.name;
+    button.dataset.address = r.address;
+    button.dataset.city = r.city;
+    button.dataset.postal = r.postal_code;
+    button.textContent = "Choose";
+
+    li.appendChild(content);
+    li.appendChild(button);
     restaurantList.appendChild(li);
   });
 }
@@ -72,38 +111,100 @@ function renderRestaurants(restaurants) {
 function renderMenu(dishes) {
   dishList.innerHTML = "";
   if (!dishes.length) {
-    dishList.innerHTML = "<li class='hint'>No menu data found for this restaurant.</li>";
+    setMessage(dishList, "li", "hint", "No menu data found for this restaurant.");
     return;
   }
   dishes.forEach((d) => {
     const li = document.createElement("li");
-    li.className = "card";
-    li.innerHTML = `
-      <div>
-        <strong>${d.name}</strong><br>
-        <span>${d.description || "No description"}</span>
-      </div>
-      <button data-dish-id="${d.id}" data-dish-name="${d.name}">Match Images</button>
-    `;
+    li.className = "card dish-card";
+    li.dataset.dishId = d.id;
+    li.dataset.dishName = d.name;
+    const content = document.createElement("div");
+    content.className = "dish-card-content";
+    const title = document.createElement("strong");
+    title.textContent = d.name;
+    content.appendChild(title);
+
+    li.appendChild(content);
     dishList.appendChild(li);
   });
+}
+
+function setActiveDishCard(dishId) {
+  dishList.querySelectorAll(".dish-card.active").forEach((card) => {
+    if (card.dataset.dishId !== dishId) {
+      card.classList.remove("active");
+    }
+  });
+  if (!dishId) return;
+  const activeCard = dishList.querySelector(`.dish-card[data-dish-id="${CSS.escape(dishId)}"]`);
+  if (activeCard) {
+    activeCard.classList.add("active");
+  }
 }
 
 function renderImages(matches) {
   imageGrid.innerHTML = "";
   if (!matches.length) {
-    imageGrid.innerHTML = "<p class='hint'>No images found.</p>";
+    setMessage(imageGrid, "p", "hint", "No images found.");
     return;
   }
   matches.forEach((m) => {
     const card = document.createElement("article");
     card.className = "img-card";
-    card.innerHTML = `
-      <img src="${m.photo_url}" alt="${m.caption || "dish image"}" loading="lazy" />
-      <div class="meta">score: ${m.score} ${m.caption ? `| ${m.caption}` : ""}</div>
-    `;
+    const image = document.createElement("img");
+    image.src = m.photo_url;
+    image.alt = m.caption || "dish image";
+    image.loading = "lazy";
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent =
+      m.source === "serpapi"
+        ? (m.caption || "Search result")
+        : `score: ${m.score}${m.caption ? ` | ${m.caption}` : ""}`;
+
+    card.appendChild(image);
+    card.appendChild(meta);
     imageGrid.appendChild(card);
   });
+}
+
+async function loadDishImages(dishId, dishName = "") {
+  if (!selectedRestaurantId || !dishId) return;
+  if (dishId === displayedDishId || dishId === pendingDishId) return;
+
+  const cacheKey = `${selectedRestaurantId}:${dishId}`;
+  const cachedMatches = dishImageCache.get(cacheKey);
+  if (cachedMatches) {
+    setActiveDishCard(dishId);
+    displayedDishId = dishId;
+    pendingDishId = null;
+    renderImages(cachedMatches);
+    return;
+  }
+
+  pendingDishId = dishId;
+  setActiveDishCard(dishId);
+  const restaurantName = selectedRestaurantName.textContent.trim();
+  const queryLabel = [restaurantName, dishName].filter(Boolean).join(" ");
+  setMessage(imageGrid, "p", "hint", queryLabel ? `Searching images for ${queryLabel}...` : "Searching images...");
+  const requestToken = ++hoverRequestToken;
+
+  try {
+    const data = await fetchJson(`/api/restaurants/${selectedRestaurantId}/dishes/${dishId}/images`);
+    if (requestToken !== hoverRequestToken) return;
+    displayedDishId = dishId;
+    dishImageCache.set(cacheKey, data.matches);
+    renderImages(data.matches);
+  } catch (error) {
+    if (requestToken !== hoverRequestToken) return;
+    setMessage(imageGrid, "p", "error", error.message);
+  } finally {
+    if (requestToken === hoverRequestToken) {
+      pendingDishId = null;
+    }
+  }
 }
 
 let suggestTimer = null;
@@ -112,12 +213,12 @@ areaInput.addEventListener("input", () => {
   suggestTimer = setTimeout(async () => {
     const q = areaInput.value.trim();
     if (!q) {
-      locationSuggestions.innerHTML = "";
+      locationSuggestions.replaceChildren();
       return;
     }
     try {
       const data = await fetchJson(`/api/locations/suggest?q=${encodeURIComponent(q)}`);
-      locationSuggestions.innerHTML = "";
+      locationSuggestions.replaceChildren();
       (data.suggestions || []).forEach((value) => {
         const option = document.createElement("option");
         option.value = value;
@@ -134,12 +235,12 @@ searchForm.addEventListener("submit", async (event) => {
   const area_query = document.getElementById("area_query").value.trim();
   const name = document.getElementById("restaurant_name").value.trim();
   if (!area_query || !name) {
-    restaurantList.innerHTML = "<li class='error'>Please enter both area and restaurant name.</li>";
+    setMessage(restaurantList, "li", "error", "Please enter both area and restaurant name.");
     return;
   }
   const query = buildQuery({ area_query, name });
 
-  restaurantList.innerHTML = "<li class='hint'>Searching...</li>";
+  setMessage(restaurantList, "li", "hint", "Searching...");
   clearUIAfterRestaurantChange();
   selectedRestaurantId = null;
   showRestaurantResults();
@@ -148,7 +249,7 @@ searchForm.addEventListener("submit", async (event) => {
     const data = await fetchJson(`/api/restaurants/search?${query}`);
     renderRestaurants(data.restaurants);
   } catch (error) {
-    restaurantList.innerHTML = `<li class='error'>${error.message}</li>`;
+    setMessage(restaurantList, "li", "error", error.message);
   }
 });
 
@@ -162,7 +263,7 @@ restaurantList.addEventListener("click", async (event) => {
   selectedRestaurantName.textContent = selectedName;
   selectedRestaurantAddress.textContent = selectedAddress;
   selectedRestaurantCard.classList.remove("hidden");
-  dishList.innerHTML = "<li class='hint'>Loading menu...</li>";
+  setMessage(dishList, "li", "hint", "Loading menu...");
   imageGrid.innerHTML = "";
   collapseRestaurantResults();
 
@@ -170,7 +271,7 @@ restaurantList.addEventListener("click", async (event) => {
     const menu = await fetchJson(`/api/restaurants/${selectedRestaurantId}/menu`);
     renderMenu(menu.dishes);
   } catch (error) {
-    dishList.innerHTML = `<li class='error'>${error.message}</li>`;
+    setMessage(dishList, "li", "error", error.message);
   }
 });
 
@@ -178,15 +279,14 @@ changeRestaurantBtn.addEventListener("click", () => {
   showRestaurantResults();
 });
 
-dishList.addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-dish-id]");
-  if (!button || !selectedRestaurantId) return;
-  const dishId = button.dataset.dishId;
-  imageGrid.innerHTML = "<p class='hint'>Matching images...</p>";
-  try {
-    const data = await fetchJson(`/api/restaurants/${selectedRestaurantId}/dishes/${dishId}/images`);
-    renderImages(data.matches);
-  } catch (error) {
-    imageGrid.innerHTML = `<p class='error'>${error.message}</p>`;
+dishList.addEventListener("mouseover", async (event) => {
+  const dishCard = event.target.closest(".dish-card[data-dish-id]");
+  if (!dishCard || !selectedRestaurantId) return;
+  if (dishCard.contains(event.relatedTarget)) return;
+  if (hoverDebounceTimer) {
+    clearTimeout(hoverDebounceTimer);
   }
+  hoverDebounceTimer = setTimeout(() => {
+    loadDishImages(dishCard.dataset.dishId, dishCard.dataset.dishName);
+  }, 220);
 });

@@ -18,6 +18,33 @@ def _localized_text(value: Any) -> str:
     return ""
 
 
+def _is_likely_section_title(candidate: str, section_label: str) -> bool:
+    name = candidate.strip().lower()
+    section = section_label.strip().lower()
+    if not name:
+        return True
+    if section and name == section:
+        return True
+    generic_titles = {
+        "menu",
+        "food menu",
+        "main menu",
+        "breakfast",
+        "lunch",
+        "dinner",
+        "dessert",
+        "drinks",
+        "beverages",
+        "appetizers",
+        "starters",
+        "entrees",
+        "mains",
+        "sides",
+        "specials",
+    }
+    return name in generic_titles
+
+
 class GooglePlacesProvider:
     """Legacy Autocomplete + Places API (New) for menus and photos."""
 
@@ -102,7 +129,11 @@ class GooglePlacesProvider:
                     "key": self.api_key,
                 },
                 timeout=10.0,
+                follow_redirects=False,
             )
+            location = response.headers.get("location")
+            if response.is_redirect and location:
+                return location
             response.raise_for_status()
             if "application/json" in response.headers.get("content-type", ""):
                 data = response.json()
@@ -131,16 +162,17 @@ class GooglePlacesProvider:
                     or section.get("menuItems")
                     or []
                 ):
-                    name = _localized_text(
-                        entry.get("displayName") or entry.get("name") or entry.get("labels")
-                    )
-                    if not name and isinstance(entry.get("labels"), list):
+                    display_name = _localized_text(entry.get("displayName"))
+                    raw_name = _localized_text(entry.get("name"))
+                    name = display_name or raw_name
+                    labels = entry.get("labels")
+                    if not name and isinstance(labels, list):
                         for lab in entry["labels"]:
                             name = _localized_text(lab.get("displayName") if isinstance(lab, dict) else lab)
                             if name:
                                 break
                     desc = _localized_text(entry.get("description"))
-                    if name:
+                    if name and not _is_likely_section_title(name, section_label):
                         ctx = section_label or "Menu"
                         items.append((name, desc or f"From Google Maps menu · {ctx}"))
         dishes: list[Dish] = []
@@ -165,5 +197,14 @@ class GooglePlacesProvider:
             cap = "Google Maps place photo"
             if author:
                 cap = f"Google Maps photo · {author}"
-            out.append(Photo(id=f"{restaurant_id}:gphoto:{idx}", url=uri, caption=cap))
+            out.append(
+                Photo(
+                    id=f"{restaurant_id}:gphoto:{idx}",
+                    url=uri,
+                    caption=cap,
+                    source="google_places",
+                    is_user_contributed=bool(author),
+                    is_placeholder=False,
+                )
+            )
         return out

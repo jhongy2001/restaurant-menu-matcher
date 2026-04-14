@@ -13,6 +13,10 @@ class RestaurantDataProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def get_restaurant(self, restaurant_id: str) -> Restaurant | None:
+        raise NotImplementedError
+
+    @abstractmethod
     def get_menu(self, restaurant_id: str) -> list[Dish]:
         raise NotImplementedError
 

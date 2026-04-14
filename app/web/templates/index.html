@@ -9,7 +9,7 @@
 <body>
   <main class="container">
     <h1>Restaurant Menu Photo Matcher</h1>
-    <p class="hint">Search by city or postal code, choose a restaurant, then click a dish to view top-5 matched photos.</p>
+    <p class="hint">Search by city or postal code, choose a restaurant, then hover over a dish to view top-{{ default_top_k }} matched photos.</p>
 
     <section class="panel">
       <h2>1) Search Restaurants</h2>
@@ -37,14 +37,16 @@
       </div>
     </section>
 
-    <section class="panel">
-      <h2>2) Menu</h2>
-      <ul id="dish-list"></ul>
-    </section>
+    <section class="content-layout">
+      <section class="panel content-panel menu-panel">
+        <h2>2) Menu</h2>
+        <ul id="dish-list"></ul>
+      </section>
 
-    <section class="panel">
-      <h2>3) Top-5 Matched Images</h2>
-      <div id="image-grid" class="image-grid"></div>
+      <section class="panel content-panel image-panel">
+        <h2>3) Top-{{ default_top_k }} Matched Images</h2>
+        <div id="image-grid" class="image-grid"></div>
+      </section>
     </section>
   </main>
   <script src="/static/app.js"></script>

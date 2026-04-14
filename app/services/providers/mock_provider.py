@@ -41,16 +41,72 @@ class MockRestaurantProvider(RestaurantDataProvider):
         }
         self._photos: dict[str, list[Photo]] = {
             "r1": [
-                Photo(id="p1", url="https://images.unsplash.com/photo-1557872943-16a5ac26437e", caption="Tonkotsu ramen bowl"),
-                Photo(id="p2", url="https://images.unsplash.com/photo-1617093727343-374698b1b08d", caption="Crispy fried chicken karaage"),
-                Photo(id="p3", url="https://images.unsplash.com/photo-1617196038435-89d4f5f4d6c0", caption="Miso ramen with corn"),
-                Photo(id="p4", url="https://images.unsplash.com/photo-1512003867696-6d5ce6835040", caption="Assorted japanese dishes"),
+                Photo(
+                    id="p1",
+                    url="https://images.unsplash.com/photo-1557872943-16a5ac26437e",
+                    caption="Tonkotsu ramen bowl",
+                    source="mock",
+                    is_user_contributed=False,
+                    is_placeholder=False,
+                ),
+                Photo(
+                    id="p2",
+                    url="https://images.unsplash.com/photo-1617093727343-374698b1b08d",
+                    caption="Crispy fried chicken karaage",
+                    source="mock",
+                    is_user_contributed=False,
+                    is_placeholder=False,
+                ),
+                Photo(
+                    id="p3",
+                    url="https://images.unsplash.com/photo-1617196038435-89d4f5f4d6c0",
+                    caption="Miso ramen with corn",
+                    source="mock",
+                    is_user_contributed=False,
+                    is_placeholder=False,
+                ),
+                Photo(
+                    id="p4",
+                    url="https://images.unsplash.com/photo-1512003867696-6d5ce6835040",
+                    caption="Assorted japanese dishes",
+                    source="mock",
+                    is_user_contributed=False,
+                    is_placeholder=False,
+                ),
             ],
             "r2": [
-                Photo(id="p5", url="https://images.unsplash.com/photo-1585032226651-759b368d7246", caption="Mapo tofu close-up"),
-                Photo(id="p6", url="https://images.unsplash.com/photo-1604908177522-0407c68f1882", caption="Kung pao chicken in wok"),
-                Photo(id="p7", url="https://images.unsplash.com/photo-1612929633738-8fe44f7ec841", caption="Spicy noodles with chili oil"),
-                Photo(id="p8", url="https://images.unsplash.com/photo-1526318896980-cf78c088247c", caption="Chinese home style dishes"),
+                Photo(
+                    id="p5",
+                    url="https://images.unsplash.com/photo-1585032226651-759b368d7246",
+                    caption="Mapo tofu close-up",
+                    source="mock",
+                    is_user_contributed=False,
+                    is_placeholder=False,
+                ),
+                Photo(
+                    id="p6",
+                    url="https://images.unsplash.com/photo-1604908177522-0407c68f1882",
+                    caption="Kung pao chicken in wok",
+                    source="mock",
+                    is_user_contributed=False,
+                    is_placeholder=False,
+                ),
+                Photo(
+                    id="p7",
+                    url="https://images.unsplash.com/photo-1612929633738-8fe44f7ec841",
+                    caption="Spicy noodles with chili oil",
+                    source="mock",
+                    is_user_contributed=False,
+                    is_placeholder=False,
+                ),
+                Photo(
+                    id="p8",
+                    url="https://images.unsplash.com/photo-1526318896980-cf78c088247c",
+                    caption="Chinese home style dishes",
+                    source="mock",
+                    is_user_contributed=False,
+                    is_placeholder=False,
+                ),
             ],
         }
 
@@ -75,6 +131,9 @@ class MockRestaurantProvider(RestaurantDataProvider):
         if name:
             results = [r for r in results if name in r.name.lower()]
         return results
+
+    def get_restaurant(self, restaurant_id: str) -> Restaurant | None:
+        return next((restaurant for restaurant in self._restaurants if restaurant.id == restaurant_id), None)
 
     def get_menu(self, restaurant_id: str) -> list[Dish]:
         return self._menus.get(restaurant_id, [])

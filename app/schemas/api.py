@@ -21,6 +21,9 @@ class ImageMatchItem(BaseModel):
     photo_url: str
     score: float = Field(ge=0.0, le=1.0)
     caption: str = ""
+    source: str = ""
+    is_user_contributed: bool = False
+    is_placeholder: bool = False
 
 
 class SearchRestaurantsResponse(BaseModel):

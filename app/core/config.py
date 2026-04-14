@@ -12,6 +12,16 @@ class Settings(BaseSettings):
 
     yelp_api_key: str = ""
     google_places_api_key: str = ""
+    serpapi_api_key: str = ""
+
+    data_provider_mode: str = "demo"
+    image_source_backend: str = "review_match"
+    image_matcher_backend: str = "hybrid"
+    clip_model_name: str = "openai/clip-vit-base-patch32"
+    clip_request_timeout_seconds: float = 8.0
+    clip_max_images_per_request: int = 8
+    serpapi_timeout_seconds: float = 8.0
+    serpapi_max_results: int = 5
 
     default_top_k: int = 5
     max_top_k: int = 10
