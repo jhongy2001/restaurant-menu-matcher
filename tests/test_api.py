@@ -468,6 +468,184 @@ def test_yelp_provider_skips_low_quality_page_and_uses_later_candidate(monkeypat
     ]
 
 
+def test_yelp_provider_rejects_low_signal_navigation_terms_as_menu_result() -> None:
+    provider = YelpRestaurantProvider("test-yelp")
+
+    names = [
+        "Delivery",
+        "Carryout",
+        "Offer Details",
+        "Our Company",
+        "Legal",
+    ]
+
+    assert provider._is_useful_menu_result(names) is False
+
+
+def test_yelp_provider_prefers_higher_quality_child_menu_over_noisy_landing_page(monkeypatch) -> None:
+    provider = YelpRestaurantProvider("test-yelp")
+
+    monkeypatch.setattr(
+        provider,
+        "get_business_payload",
+        lambda restaurant_id: {
+            "name": "Domino's Pizza",
+            "location": {"city": "Boston"},
+            "attributes": {"menu_url": "https://www.dominos.com/en/menu"},
+        },
+    )
+    monkeypatch.setattr(provider, "_search_menu_candidate_urls", lambda restaurant_id: [])
+    monkeypatch.setattr(
+        provider,
+        "_fetch_menu_page",
+        lambda menu_url: {
+            "https://www.dominos.com/en/menu": """
+                <a href="/menu/build-your-own">Start Building Your Own Pizza</a>
+                <a href="/menu/wings">Wings</a>
+                <div class="menu-item-name">Delivery</div>
+                <div class="menu-item-name">Carryout</div>
+                <div class="menu-item-name">Offer Details</div>
+                <div class="menu-item-name">Our Company</div>
+                <div class="menu-item-name">Legal</div>
+            """,
+            "https://www.dominos.com/menu/build-your-own": """
+                <div class="menu-item-name">Hand Tossed Pizza</div>
+                <div class="menu-item-name">Brooklyn Style Pizza</div>
+                <div class="menu-item-name">Crunchy Thin Crust Pizza</div>
+                <div class="menu-item-name">Gluten Free Crust Pizza</div>
+            """,
+            "https://www.dominos.com/menu/wings": """
+                <div class="menu-item-name">Hot Buffalo Wings</div>
+                <div class="menu-item-name">Honey BBQ Wings</div>
+                <div class="menu-item-name">Plain Wings</div>
+            """,
+        }[menu_url],
+    )
+
+    dishes = provider.get_menu("yelp:r1")
+
+    assert [dish.name for dish in dishes] == [
+        "Hand Tossed Pizza",
+        "Brooklyn Style Pizza",
+        "Crunchy Thin Crust Pizza",
+        "Gluten Free Crust Pizza",
+        "Hot Buffalo Wings",
+        "Honey BBQ Wings",
+        "Plain Wings",
+    ]
+
+
+def test_yelp_provider_menu_quality_prefers_entrees_over_condiments() -> None:
+    provider = YelpRestaurantProvider("test-yelp")
+
+    condiments = [
+        "Slice Sauce Dipping Cup",
+        "Hot Buffalo Dipping Cup",
+        "Caesar Dressing",
+        "Ranch Dressing",
+        "Balsamic",
+    ]
+    entrees = [
+        "Spicy Chicken Bacon Ranch",
+        "ExtravaganZZa",
+        "MeatZZa",
+        "Pacific Veggie",
+        "Ultimate Pepperoni",
+    ]
+
+    assert provider._should_replace_menu_result(condiments, entrees) is True
+
+
+def test_yelp_provider_build_dishes_filters_customize_and_dipping_items(monkeypatch) -> None:
+    provider = YelpRestaurantProvider("test-yelp")
+
+    monkeypatch.setattr(
+        provider,
+        "get_business_payload",
+        lambda restaurant_id: {"name": "Domino's Pizza"},
+    )
+
+    dishes = provider._build_dishes_from_names(
+        "yelp:r1",
+        [
+            "Slice Sauce Dipping Cup",
+            "Customize Slice Sauce Dipping Cup",
+            "Ranch Dressing",
+            "Ultimate Pepperoni",
+            "Pacific Veggie",
+        ],
+        "https://www.dominos.com/menu/sides",
+    )
+
+    assert [dish.name for dish in dishes] == [
+        "Ultimate Pepperoni",
+        "Pacific Veggie",
+    ]
+
+
+def test_yelp_provider_merges_multiple_high_quality_child_menu_pages(monkeypatch) -> None:
+    provider = YelpRestaurantProvider("test-yelp")
+
+    monkeypatch.setattr(
+        provider,
+        "get_business_payload",
+        lambda restaurant_id: {
+            "name": "Domino's Pizza",
+            "location": {"city": "Boston"},
+            "attributes": {"menu_url": "https://www.dominos.com/en/menu"},
+        },
+    )
+    monkeypatch.setattr(provider, "_search_menu_candidate_urls", lambda restaurant_id: [])
+    monkeypatch.setattr(
+        provider,
+        "_fetch_menu_page",
+        lambda menu_url: {
+            "https://www.dominos.com/en/menu": """
+                <a href="/menu/specialty">Specialty Pizza</a>
+                <a href="/menu/bread">Bread</a>
+                <a href="/menu/wings">Wings</a>
+                <a href="/menu/sides">Sides</a>
+            """,
+            "https://www.dominos.com/menu/specialty": """
+                <div class="menu-item-name">ExtravaganZZa</div>
+                <div class="menu-item-name">MeatZZa</div>
+                <div class="menu-item-name">Pacific Veggie</div>
+                <div class="menu-item-name">Ultimate Pepperoni</div>
+            """,
+            "https://www.dominos.com/menu/bread": """
+                <div class="menu-item-name">Parmesan Bread Bites</div>
+                <div class="menu-item-name">Stuffed Cheesy Bread</div>
+                <div class="menu-item-name">Pepperoni Stuffed Cheesy Bread</div>
+            """,
+            "https://www.dominos.com/menu/wings": """
+                <div class="menu-item-name">Hot Buffalo Wings</div>
+                <div class="menu-item-name">Honey BBQ Wings</div>
+                <div class="menu-item-name">Plain Wings</div>
+            """,
+            "https://www.dominos.com/menu/sides": """
+                <div class="menu-item-name">Slice Sauce Dipping Cup</div>
+                <div class="menu-item-name">Ranch Dressing</div>
+                <div class="menu-item-name">Customize Slice Sauce Dipping Cup</div>
+            """,
+        }[menu_url],
+    )
+
+    dishes = provider.get_menu("yelp:r1")
+
+    assert [dish.name for dish in dishes] == [
+        "ExtravaganZZa",
+        "MeatZZa",
+        "Pacific Veggie",
+        "Ultimate Pepperoni",
+        "Parmesan Bread Bites",
+        "Stuffed Cheesy Bread",
+        "Pepperoni Stuffed Cheesy Bread",
+        "Hot Buffalo Wings",
+        "Honey BBQ Wings",
+        "Plain Wings",
+    ]
+
+
 def test_yelp_provider_extracts_menu_items_from_singleplatform_page() -> None:
     provider = YelpRestaurantProvider("test-yelp")
     html = """

@@ -144,6 +144,82 @@ class YelpRestaurantProvider(RestaurantDataProvider):
         "sign up",
         "reported gf",
     )
+    MENU_LOW_SIGNAL_PHRASES = {
+        "about",
+        "about us",
+        "additional services",
+        "add deal",
+        "all locations",
+        "careers",
+        "carryout",
+        "corporate",
+        "customer support",
+        "delivery",
+        "drive thru",
+        "email text offers",
+        "find a kfc",
+        "financial information",
+        "gift cards",
+        "gluten free warning",
+        "ingredients",
+        "investor inquiries",
+        "investor resources",
+        "jobs",
+        "legal",
+        "offer details",
+        "open mobile menu",
+        "our company",
+        "our pizza",
+        "press releases",
+        "specialty pizza",
+        "start building your own pizza",
+        "stock information",
+        "trending",
+        "wifi",
+    }
+    MENU_LOW_VALUE_PATTERNS = (
+        re.compile(r"^customize\b", re.IGNORECASE),
+        re.compile(r"\bdipping cup\b", re.IGNORECASE),
+        re.compile(r"\bdressing\b", re.IGNORECASE),
+        re.compile(r"^free with\b", re.IGNORECASE),
+        re.compile(r"^\d+%\s+off\b", re.IGNORECASE),
+    )
+    MENU_ENTREE_HINTS = {
+        "alfredo",
+        "bacon",
+        "bbq",
+        "bites",
+        "bowl",
+        "bread",
+        "brownie",
+        "burger",
+        "cake",
+        "calzone",
+        "caesar",
+        "cheese",
+        "chicken",
+        "combo",
+        "cookie",
+        "corn",
+        "crust",
+        "dessert",
+        "fries",
+        "mac",
+        "meal",
+        "nuggets",
+        "pasta",
+        "pepperoni",
+        "pie",
+        "pizza",
+        "potatoes",
+        "salad",
+        "sandwich",
+        "slaw",
+        "steak",
+        "tenders",
+        "tots",
+        "wings",
+    }
     PRICE_PATTERN = re.compile(r"""^\$?\d+(?:[.,]\d{1,2})?$""")
     PHONE_PATTERN = re.compile(r"""\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}""")
     RATING_PATTERN = re.compile(r"""^\d{1,3}%\s*\(\d+\)$""")
@@ -404,21 +480,73 @@ class YelpRestaurantProvider(RestaurantDataProvider):
             return False
         return True
 
+    def _is_low_signal_menu_name(self, candidate: str) -> bool:
+        normalized = self._normalize_candidate_name(candidate)
+        if not normalized:
+            return True
+        lowered = re.sub(r"[^a-z0-9]+", " ", normalized.lower()).strip()
+        if not lowered:
+            return True
+        if lowered in self.MENU_STOPWORDS:
+            return True
+        if lowered in self.MENU_LOW_SIGNAL_PHRASES:
+            return True
+        if any(phrase in lowered for phrase in self.MENU_LOW_SIGNAL_PHRASES):
+            return True
+        return False
+
+    def _menu_name_quality(self, candidate: str) -> int:
+        normalized = self._normalize_candidate_name(candidate)
+        if not normalized or self._is_low_signal_menu_name(normalized):
+            return 0
+        lowered = re.sub(r"[^a-z0-9]+", " ", normalized.lower()).strip()
+        if not lowered:
+            return 0
+        if any(pattern.search(normalized) for pattern in self.MENU_LOW_VALUE_PATTERNS):
+            return 0
+        words = [word for word in lowered.split() if word]
+        score = 1
+        if len(words) >= 2:
+            score += 1
+        if any(hint in words for hint in self.MENU_ENTREE_HINTS):
+            score += 1
+        if len(words) == 1 and any(ch.isupper() for ch in normalized[1:]):
+            score += 1
+        return score
+
+    def _menu_result_metrics(self, names: list[str]) -> tuple[int, int, float, int]:
+        if not names:
+            return 0, 0, 0.0, 0
+        qualities = [self._menu_name_quality(name) for name in names]
+        strong_item_count = sum(1 for quality in qualities if quality >= 2)
+        total_quality = sum(qualities)
+        high_signal_ratio = sum(1 for quality in qualities if quality > 0) / len(names)
+        return strong_item_count, total_quality, high_signal_ratio, len(names)
+
     def _is_useful_menu_result(self, names: list[str]) -> bool:
         if not names:
             return False
-        weak_tokens = {"menu", "menus", "order", "online", "gallery", "home", "contact", "reservation", "news", "catering"}
-        strong_count = 0
-        for name in names:
-            lowered = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
-            if any(token in lowered.split() for token in weak_tokens):
-                continue
-            strong_count += 1
-        if strong_count >= 5:
+        strong_item_count, total_quality, high_signal_ratio, total_count = self._menu_result_metrics(names)
+        if strong_item_count == 0:
+            return False
+        if total_count <= 2:
+            return strong_item_count == total_count
+        if strong_item_count == total_count:
+            return strong_item_count >= 2
+        if total_count <= 4 and strong_item_count >= 2 and total_quality >= 7 and high_signal_ratio >= 0.75:
             return True
-        if strong_count >= 2 and strong_count == len(names):
+        if strong_item_count >= 5 and total_quality >= 12 and high_signal_ratio >= 0.5:
             return True
-        return strong_count >= 3 and strong_count >= len(names) - 1
+        if strong_item_count >= 4 and total_quality >= 10 and high_signal_ratio >= 0.65:
+            return True
+        return strong_item_count >= 3 and total_quality >= 8 and high_signal_ratio >= 0.75
+
+    def _should_replace_menu_result(self, current_names: list[str], candidate_names: list[str]) -> bool:
+        current_is_useful = self._is_useful_menu_result(current_names)
+        candidate_is_useful = self._is_useful_menu_result(candidate_names)
+        if candidate_is_useful != current_is_useful:
+            return candidate_is_useful
+        return self._menu_result_metrics(candidate_names) > self._menu_result_metrics(current_names)
 
     def _extract_menu_item_names_from_price_neighbors(self, html: str) -> list[str]:
         lines = self._extract_text_lines(html)
@@ -458,7 +586,11 @@ class YelpRestaurantProvider(RestaurantDataProvider):
         return out
 
     def _remove_restaurant_name_entries(self, restaurant_id: str, names: list[str]) -> list[str]:
-        payload = self.get_business_payload(restaurant_id)
+        try:
+            payload = self.get_business_payload(restaurant_id)
+        except Exception:
+            logger.debug("Skipping restaurant-name filtering for restaurant_id=%s", restaurant_id, exc_info=True)
+            return names
         restaurant_name = self._normalize_candidate_name(str(payload.get("name") or ""))
         if not restaurant_name:
             return names
@@ -590,6 +722,64 @@ class YelpRestaurantProvider(RestaurantDataProvider):
             names.extend(self._extract_menu_item_names_from_markup(html))
         return self._dedupe_names(names)
 
+    def _collect_page_menu_names(self, menu_url: str, html: str) -> list[str]:
+        item_names = self._extract_menu_item_names_from_page(menu_url, html)
+        if item_names:
+            return item_names
+        for category_url in self._extract_menu_category_urls(menu_url, html)[:15]:
+            try:
+                category_html = self._fetch_menu_page(category_url)
+            except httpx.HTTPError as exc:
+                logger.warning("Failed to fetch category_url=%s: %s", category_url, exc)
+                continue
+            for name in self._extract_menu_item_names_from_page(category_url, category_html):
+                if name not in item_names:
+                    item_names.append(name)
+        return item_names
+
+    def _collect_child_menu_results(self, menu_url: str, html: str) -> list[tuple[str, list[str]]]:
+        results: list[tuple[str, list[str]]] = []
+        for child_menu_url in self._extract_generic_menu_urls(menu_url, html)[:15]:
+            try:
+                child_html = self._fetch_menu_page(child_menu_url)
+            except httpx.HTTPError as exc:
+                logger.warning("Failed to fetch child_menu_url=%s: %s", child_menu_url, exc)
+                continue
+            child_item_names = self._collect_page_menu_names(child_menu_url, child_html)
+            if not child_item_names:
+                for nested_url in self._extract_generic_menu_urls(child_menu_url, child_html)[:10]:
+                    try:
+                        nested_html = self._fetch_menu_page(nested_url)
+                    except httpx.HTTPError as exc:
+                        logger.warning("Failed to fetch nested_menu_url=%s: %s", nested_url, exc)
+                        continue
+                    for name in self._extract_menu_item_names_from_page(nested_url, nested_html):
+                        if name not in child_item_names:
+                            child_item_names.append(name)
+            if child_item_names:
+                results.append((child_menu_url, child_item_names))
+        return results
+
+    def _merge_menu_results(self, page_results: list[tuple[str, list[str]]]) -> tuple[str, list[str]]:
+        merged_names: list[str] = []
+        merged_urls: list[str] = []
+        for page_url, names in page_results:
+            quality_names = [name for name in names if self._menu_name_quality(name) > 0]
+            if not quality_names:
+                continue
+            new_quality_names = [name for name in quality_names if name not in merged_names]
+            if merged_names and len(new_quality_names) < 2:
+                continue
+            merged_urls.append(page_url)
+            merged_names.extend(new_quality_names)
+            if len(merged_names) >= 80:
+                break
+        if not merged_urls:
+            return "", []
+        if len(merged_urls) == 1:
+            return merged_urls[0], merged_names[:80]
+        return f"{merged_urls[0]} (+{len(merged_urls) - 1} related menu pages)", merged_names[:80]
+
     def _candidate_menu_urls(self, restaurant_id: str) -> list[str]:
         candidates: list[str] = []
         seen: set[str] = set()
@@ -602,7 +792,11 @@ class YelpRestaurantProvider(RestaurantDataProvider):
         return candidates
 
     def _build_dishes_from_names(self, restaurant_id: str, names: list[str], menu_url: str) -> list[Dish]:
-        cleaned_names = self._remove_restaurant_name_entries(restaurant_id, names)
+        cleaned_names = [
+            name
+            for name in self._remove_restaurant_name_entries(restaurant_id, names)
+            if self._menu_name_quality(name) > 0
+        ]
         return [
             Dish(
                 id=f"{restaurant_id}:menu:{idx}",
@@ -619,41 +813,16 @@ class YelpRestaurantProvider(RestaurantDataProvider):
             except httpx.HTTPError as exc:
                 logger.warning("Failed to fetch menu_url=%s: %s", menu_url, exc)
                 continue
-            item_names = self._extract_menu_item_names_from_page(menu_url, html)
-            if not item_names:
-                for category_url in self._extract_menu_category_urls(menu_url, html)[:15]:
-                    try:
-                        category_html = self._fetch_menu_page(category_url)
-                    except httpx.HTTPError as exc:
-                        logger.warning("Failed to fetch category_url=%s: %s", category_url, exc)
-                        continue
-                    for name in self._extract_menu_item_names_from_page(category_url, category_html):
-                        if name not in item_names:
-                            item_names.append(name)
-            if not self._is_useful_menu_result(item_names):
-                for child_menu_url in self._extract_generic_menu_urls(menu_url, html)[:15]:
-                    try:
-                        child_html = self._fetch_menu_page(child_menu_url)
-                    except httpx.HTTPError as exc:
-                        logger.warning("Failed to fetch child_menu_url=%s: %s", child_menu_url, exc)
-                        continue
-                    child_item_names = self._extract_menu_item_names_from_page(child_menu_url, child_html)
-                    if not child_item_names:
-                        for nested_url in self._extract_generic_menu_urls(child_menu_url, child_html)[:10]:
-                            try:
-                                nested_html = self._fetch_menu_page(nested_url)
-                            except httpx.HTTPError as exc:
-                                logger.warning("Failed to fetch nested_menu_url=%s: %s", nested_url, exc)
-                                continue
-                            for name in self._extract_menu_item_names_from_page(nested_url, nested_html):
-                                if name not in child_item_names:
-                                    child_item_names.append(name)
-                    if self._is_useful_menu_result(child_item_names):
-                        item_names = child_item_names
-                        menu_url = child_menu_url
-                        break
-            if self._is_useful_menu_result(item_names):
-                return self._build_dishes_from_names(restaurant_id, item_names, menu_url)
+            root_item_names = self._collect_page_menu_names(menu_url, html)
+            page_results: list[tuple[str, list[str]]] = []
+            if self._is_useful_menu_result(root_item_names):
+                page_results.append((menu_url, root_item_names))
+            for child_menu_url, child_item_names in self._collect_child_menu_results(menu_url, html):
+                if self._is_useful_menu_result(child_item_names):
+                    page_results.append((child_menu_url, child_item_names))
+            merged_menu_url, merged_names = self._merge_menu_results(page_results)
+            if merged_names and self._is_useful_menu_result(merged_names):
+                return self._build_dishes_from_names(restaurant_id, merged_names, merged_menu_url)
         return []
 
     def get_review_photos(self, restaurant_id: str) -> list[Photo]:
